@@ -112,7 +112,7 @@ Special thanks to Prof. Jian Yang and his team for developing the [original SMR 
 ## 📧 Contact
 
 - **Author**: Cangming
-- **Email**: 202201230726@163.com
+- **Email**: 202201230726@bucm.edu.cn
 - **WeChat**: CangMing-03
 
 For questions or suggestions, please submit via [Issues](https://github.com/CangmingDing/pySMR_Preview/issues)!
