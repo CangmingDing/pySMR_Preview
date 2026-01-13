@@ -112,7 +112,7 @@ python main.py \
 ## 📧 联系方式
 
 - **作者**：Cangming
-- **邮箱**：202201230726@163.com
+- **邮箱**：202201230726@bucm.edu.cn
 - **微信**：CangMing-03
 
 如有问题或建议，欢迎通过 [Issues](https://github.com/CangmingDing/pySMR_Preview/issues) 反馈！
