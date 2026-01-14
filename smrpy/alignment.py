@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-def align_stats(gwas_df, eqtl_df, freq_thresh=0.2):
+def align_stats(gwas_df, eqtl_df, freq_thresh=0.2, strict_freq=True):
     """
     Align GWAS and eQTL summary statistics.
     Includes:
@@ -51,22 +51,6 @@ def align_stats(gwas_df, eqtl_df, freq_thresh=0.2):
         # Frequency Check mechanism
         # Only if frequencies are available in both datasets
         if factor != 0 and pd.notnull(freq_g) and pd.notnull(freq_e):
-            # If factor is 1, freq_e should match freq_g (ref is same)
-            # If factor is -1, freq_e should match 1-freq_g (ref is swapped)
-            
-            fg_compare = freq_g
-            if factor == -1:
-                # If we flip beta, we are effectively using the other allele as reference for checking frequency consistency?
-                # Actually usually archives store freq of A1. 
-                # If datasets match (A1=A1), freqs should match.
-                # If datasets flipped (A1=A2), freq(A1_e) should equal freq(A2_g) = 1 - freq(A1_g).
-                pass
-            
-            # Let's standardize comparison logic:
-            # We want to compare the frequency of the GWAS effect allele (A1_GWAS)
-            # In eQTL:
-            # If eQTL aligned directly (factor 1), eQTL A1 is A1_GWAS. So we check freq_e vs freq_g.
-            # If eQTL aligned flipped (factor -1), eQTL A1 is A2_GWAS. So freq_e is freq(A2_GWAS) = 1 - freq_g.
             
             freq_diff = 0
             if factor == 1:
@@ -77,7 +61,9 @@ def align_stats(gwas_df, eqtl_df, freq_thresh=0.2):
             if freq_diff > freq_thresh:
                 # SMR logic: Remove if frequency difference is too large. 
                 # This indicates likely strand error or different populations.
-                return 0 # Exclude
+                if strict_freq:
+                    return 0 # Exclude
+                # If strict_freq is False, we keep it (risk of strand error)
                 
             # Ambiguous (Palindromic) Check logic from SMR (A/T or C/G)
             # If alleles are palindromic, we strictly rely on frequency.

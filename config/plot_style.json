@@ -1,0 +1,97 @@
+{
+    "figure": {
+        "figsize_locus": [
+            11,
+            9
+        ],
+        "figsize_effect": [
+            7,
+            7
+        ],
+        "figsize_manhattan": [
+            14,
+            6
+        ],
+        "figsize_qq": [
+            6,
+            6
+        ],
+        "figsize_volcano": [
+            8,
+            6
+        ],
+        "figsize_heidi": [
+            8,
+            6
+        ],
+        "figsize_multi": [
+            8,
+            6
+        ],
+        "dpi": 300
+    },
+    "fonts": {
+        "family": "sans-serif",
+        "sans_serif": [
+            "Helvetica",
+            "Arial",
+            "DejaVu Sans"
+        ],
+        "size_title": 14,
+        "size_label": 11,
+        "size_tick": 9,
+        "weight_title": "bold"
+    },
+    "colors": {
+        "locus_gwas": "#777777",
+        "locus_eqtl": "#A62A55",
+        "locus_gene": "#8B8000",
+        "locus_top_snp": "#4B0082",
+        "locus_smr_line": "#D02090",
+        "effect_errorbar": "#483D8B",
+        "effect_regression": "#FF8C00",
+        "effect_gradient": [
+            "#4169E1",
+            "#000080",
+            "#101010"
+        ],
+        "manhattan_palette": [
+            "#E41A1C",
+            "#377EB8",
+            "#4DAF4A",
+            "#984EA3",
+            "#FF7F00",
+            "#FFFF33",
+            "#A65628",
+            "#F781BF",
+            "#999999",
+            "#66C2A5",
+            "#FC8D62",
+            "#8DA0CB",
+            "#E78AC3",
+            "#A6D854",
+            "#FFD92F",
+            "#E5C494",
+            "#B3B3B3",
+            "#1B9E77",
+            "#D95F02",
+            "#7570B3",
+            "#E7298A",
+            "#66A61E"
+        ],
+        "manhattan_sig_up": "#E41A1C",
+        "manhattan_sig_down": "#377EB8",
+        "manhattan_nonsig_alpha": 0.6,
+        "qq_line": "red",
+        "qq_ci": "grey",
+        "volcano_sig": "#E41A1C",
+        "volcano_nonsig": "grey",
+        "heidi_pass": "#377EB8",
+        "heidi_fail": "grey"
+    },
+    "markers": {
+        "size_default": 20,
+        "size_top": 80,
+        "size_gene_arrow": 0.02
+    }
+}

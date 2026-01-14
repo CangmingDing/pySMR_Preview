@@ -105,6 +105,7 @@ def heidi_test(b_zx, se_zx, b_zy, se_zy, ld_matrix):
     # Correlation matrix of deviations
     V_corr = V / np.sqrt(np.outer(diag_V, diag_V))
     
+
     # Eigenvalues
     lambdas = np.linalg.eigvalsh(V_corr)
     
@@ -112,3 +113,56 @@ def heidi_test(b_zx, se_zx, b_zy, se_zy, ld_matrix):
     p_heidi = pchisqsum(sum_chisq_dev, lambdas)
     
     return p_heidi, nsnp
+
+def smr_multi_snp_test(b_zx, se_zx, b_zy, se_zy, ld_matrix):
+    """
+    Perform Multi-SNP SMR test (Set-based SMR).
+    Tests the null hypothesis that none of the selected instruments have a causal effect.
+    Statistic: Sum of Chi-squared SMR statistics for selected SNPs.
+    Distribution: Weighted sum of Chi-squared variables (weights = eigenvalues of LD matrix).
+    
+    Args:
+        b_zx, se_zx: eQTL effects (vectors)
+        b_zy, se_zy: GWAS effects (vectors)
+        ld_matrix: LD correlation matrix (R)
+        
+    Returns:
+        p_smr_multi: P-value of the set-based test
+        nsnp: Number of SNPs used
+    """
+    nsnp = len(b_zx)
+    if nsnp == 0:
+        return np.nan, 0
+        
+    # Calculate Z-scores
+    z_zx = b_zx / se_zx
+    z_zy = b_zy / se_zy
+    
+    # Calculate SMR Chi-square statistic for each SNP
+    # z_smr^2 = (z_zx^2 * z_zy^2) / (z_zx^2 + z_zy^2)
+    # This is algebraically equivalent to (b_xy / se_xy)^2 derived by Delta method 
+    # (assuming approximations held in C++ source)
+    
+    z_zx2 = z_zx**2
+    z_zy2 = z_zy**2
+    
+    # Avoid division by zero
+    denom = z_zx2 + z_zy2
+    denom[denom == 0] = 1e-10
+    
+    chisq_smr = (z_zx2 * z_zy2) / denom
+    
+    # Observed Statistic
+    t_obs = np.sum(chisq_smr)
+    
+    # Eigenvalues of LD matrix (Correlation matrix of Z-scores)
+    # Note: SMR assumes the correlation of SMR statistics is approximately the LD Matrix
+    if nsnp > 1:
+        lambdas = np.linalg.eigvalsh(ld_matrix)
+    else:
+        lambdas = np.array([1.0])
+        
+    # Calculate P-value
+    p_multi = pchisqsum(t_obs, lambdas)
+    
+    return p_multi, nsnp

@@ -4,8 +4,8 @@ import numpy as np
 import os
 from smrpy.io import load_gwas, load_eqtl, get_ld_matrix, get_ld_vector, read_plink1_bin, load_file_chunked, clear_snp_cache, _SNP_INDEX_CACHE
 from smrpy.alignment import align_stats
-from smrpy.stats import smr_test, heidi_test
-from smrpy.plot import plot_locus, plot_effect_size
+from smrpy.stats import smr_test, heidi_test, smr_multi_snp_test
+from smrpy.plot import plot_locus, plot_effect_size, plot_manhattan, plot_qq, plot_volcano, plot_smr_vs_heidi, plot_single_vs_multi
 from tqdm import tqdm
 import gc
 from joblib import Parallel, delayed
@@ -58,6 +58,63 @@ def process_gene(gene, chrom, gene_data, args, G_ref_chrom=None):
                                   top_snp_row['SE_EQTL'],
                                   top_snp_row['B_GWAS'],
                                   top_snp_row['SE_GWAS'])
+    
+    # --- Multi-SNP SMR Test ---
+    p_smr_multi = np.nan
+    nsnp_multi = 0
+    
+    # 1. Select Candidates (P < peqtl_smr)
+    # candidates df already defined above
+    if args.smr_multi and len(candidates) >= 1 and G_ref_chrom is not None:
+        try:
+             # Get LD for all candidates
+            snp_list_multi = candidates['SNP'].values
+            ld_mat_multi, snps_in_ld_multi = get_ld_matrix(G_ref_chrom, snp_list_multi, chrom=chrom)
+            
+            if ld_mat_multi is not None and len(snps_in_ld_multi) > 0:
+                # Align data to LD matrix order
+                multi_data = candidates.set_index('SNP').loc[snps_in_ld_multi]
+                
+                # Pruning for stability (Remove exact duplicates/very high LD)
+                # Greedy selection based on P-value
+                # If we don't prune, close-to-singular matrices cause issues for eigen-decomposition
+                # Using args.ld_multi_snp default 0.1
+                
+                prune_thresh = args.ld_multi_snp
+                sorted_idx = np.argsort(multi_data['P_EQTL'].values)
+                selected_indices = []
+                
+                # Keep track of 'removed' indices
+                removed_mask = np.zeros(len(sorted_idx), dtype=bool)
+                
+                for i in sorted_idx:
+                    if removed_mask[i]:
+                        continue
+                    
+                    selected_indices.append(i)
+                    
+                    # Mark neighbors as removed
+                    r2_vec = ld_mat_multi[i, :]**2
+                    to_remove = np.where(r2_vec > prune_thresh)[0]
+                    removed_mask[to_remove] = True
+                    
+                selected_indices = np.array(selected_indices)
+                
+                if len(selected_indices) > 0:
+                     # Subset Data
+                    b_zx_m = multi_data.iloc[selected_indices]['B_EQTL_ALIGNED'].values
+                    se_zx_m = multi_data.iloc[selected_indices]['SE_EQTL'].values
+                    b_zy_m = multi_data.iloc[selected_indices]['B_GWAS'].values
+                    se_zy_m = multi_data.iloc[selected_indices]['SE_GWAS'].values
+                    
+                    ld_mat_final_m = ld_mat_multi[np.ix_(selected_indices, selected_indices)]
+                    
+                    p_smr_multi, nsnp_multi = smr_multi_snp_test(b_zx_m, se_zx_m, b_zy_m, se_zy_m, ld_mat_final_m)
+
+        except Exception as e:
+            # print(f"Multi-SMR Error: {e}")
+            pass
+
     
     # HEIDI Test
     heidi_snps_data = gene_data[gene_data['P_EQTL'] < args.peqtl_heidi]
@@ -122,6 +179,8 @@ def process_gene(gene, chrom, gene_data, args, G_ref_chrom=None):
         'b_SMR': b_xy,
         'se_SMR': se_xy,
         'p_SMR': p_smr,
+        'p_SMR_multi': p_smr_multi,
+        'nsnp_multi': nsnp_multi,
         'p_HEIDI': p_heidi,
         'nsnp_HEIDI': nsnp_heidi
     }
@@ -152,16 +211,32 @@ def main():
     parser.add_argument("--diff-freq", type=float, default=0.2, help="Maximum allele frequency difference allowed (default 0.2)")
     parser.add_argument("--cis-wind", type=int, default=2000, help="Cis-window in Kb (default 2000)")
     
+    # Frequency Strictness (New)
+    parser.add_argument("--no-strict-freq", action='store_true', help="Disable strict frequency check (NOT RECOMMENDED). If set, SNPs with freq difference > threshold will be kept if alleles match.")
+    parser.add_argument("--freq-prop-tol", type=float, default=0.05, help="Tolerance of proportion of SNPs failing frequency check (default 0.05)")
+
     # HEIDI Params
+    parser.add_argument("--heidi-min-m", type=int, default=3, help="Min SNPs (m) for HEIDI test (default 3)")
     parser.add_argument("--heidi-max-m", type=int, default=20, help="Max SNPs for HEIDI test")
-    parser.add_argument("--ld-upper-limit", type=float, default=0.9, help="LD max r2 for HEIDI SNPs")
-    parser.add_argument("--ld-lower-limit", type=float, default=0.05, help="LD min r2 for HEIDI SNPs")
+    parser.add_argument("--ld-upper-limit", type=float, default=0.9, help="LD max r2 for HEIDI SNPs (default 0.9)")
+    parser.add_argument("--ld-lower-limit", type=float, default=0.05, help="LD min r2 for HEIDI SNPs (default 0.05)")
+    
+    # Multi-SNP SMR Params (Parity with C++)
+    parser.add_argument("--smr-multi", action='store_true', help="Enable Multi-SNP SMR test (default: False)")
+    parser.add_argument("--ld-multi-snp", type=float, default=0.1, help="LD r2 threshold for Multi-SNP pruning (default 0.1 matches C++ SMR)")
+
     
     # Visualization
     parser.add_argument("--plot", action='store_true', help="Generate locus plots for significant results")
     parser.add_argument("--plot-threshold", type=float, default=5e-8, help="P-SMR threshold for plotting")
+    parser.add_argument("--plot-pdf", action='store_true', help="Save plots as PDF instead of PNG")
+    parser.add_argument("--add-gene-symbol", action='store_true', help="Convert probe IDs to Gene Symbols in plots")
+    parser.add_argument("--gene-annotation", help="Path to CSV/TSV file for ID mapping (columns: probeID, geneSymbol)")
 
     args = parser.parse_args()
+
+    # Derived arguments logic
+    args.strict_freq = not args.no_strict_freq  # Default is True unless flag is set
 
     print("\n--- SMRpy v0.3.0 Pipeline Started ---")
     if args.threads > 1:
@@ -216,7 +291,7 @@ def main():
     
     # --- Step 3: Alignment ---
     print("Aligning GWAS and eQTL...")
-    data = align_stats(gwas, eqtl, freq_thresh=args.diff_freq)
+    data = align_stats(gwas, eqtl, freq_thresh=args.diff_freq, strict_freq=args.strict_freq)
     
     if data.empty:
         print("No overlapping SNPs found after alignment and QC.")
@@ -247,6 +322,26 @@ def main():
 
     chroms = sorted(data['CHR'].unique())
     all_results = []
+    
+    # Plotting setup
+    plot_ext = "pdf" if args.plot_pdf else "png"
+    gene_mapping = None
+    
+    if args.add_gene_symbol:
+        if args.gene_annotation:
+            try:
+                print(f"Loading gene annotation: {args.gene_annotation}")
+                # Try simple load: assumes header
+                anno_df = pd.read_csv(args.gene_annotation, sep=None, engine='python')
+                # Assume first two columns are ID and Symbol if not named specifically
+                if 'probeID' in anno_df.columns and 'geneSymbol' in anno_df.columns:
+                    gene_mapping = dict(zip(anno_df['probeID'], anno_df['geneSymbol']))
+                else:
+                    # Fallback to index 0 and 1
+                    gene_mapping = dict(zip(anno_df.iloc[:, 0], anno_df.iloc[:, 1]))
+                print(f"  Loaded {len(gene_mapping)} mappings.")
+            except Exception as e:
+                print(f"  Error loading annotation: {e}")
     
     if args.plot:
         plot_dir = f"{args.out}_plots"
@@ -338,28 +433,45 @@ def main():
                 region_eqtl = eqtl[(eqtl['CHR'] == chrom) & (eqtl['POS'].between(gene_pos - window_bp, gene_pos + window_bp))]
                 
                 if not region_eqtl.empty:
-                    region_genes = region_eqtl.groupby('GENE').agg({
+                    agg_dict = {
                         'TSS': 'first',
-                        'POS': 'mean', 
-                    }).reset_index().rename(columns={'GENE': 'gene_id'})
-                    region_genes['strand'] = '+'
+                        'POS': 'mean',
+                    }
+                    
+                    # Try to capture strand if it exists
+                    strand_col = None
+                    for col in ['strand', 'STRAND', 'orientation', 'ori']:
+                        if col in region_eqtl.columns:
+                            strand_col = col
+                            break
+                    
+                    if strand_col:
+                         agg_dict[strand_col] = 'first'
+                    
+                    region_genes = region_eqtl.groupby('GENE').agg(agg_dict).reset_index().rename(columns={'GENE': 'gene_id'})
+                    
+                    if strand_col:
+                        region_genes['strand'] = region_genes[strand_col]
+                    else:
+                        region_genes['strand'] = '.' # Unknown
+                        
                     region_genes['Probe_bp'] = region_genes['POS']
                 else:
                     region_genes = None
 
-                locus_plot_name = f"{gene}_{chrom}_locus.png"
+                locus_plot_name = f"{gene}_{chrom}_locus.{plot_ext}"
                 locus_plot_path = os.path.join(plot_dir, locus_plot_name)
-                plot_locus(gene_data, res_entry, locus_plot_path, region_genes=region_genes)
+                plot_locus(gene_data, res_entry, locus_plot_path, region_genes=region_genes, mapping=gene_mapping)
                 
-                effect_plot_name = f"{gene}_{chrom}_effect.png"
+                effect_plot_name = f"{gene}_{chrom}_effect.{plot_ext}"
                 effect_plot_path = os.path.join(plot_dir, effect_plot_name)
                 
                 try:
                     all_snps = gene_data['SNP'].values
                     ld_vec, snp_list_ld = get_ld_vector(G_ref_chrom, res_entry['topSNP'], all_snps, chrom=chrom)
-                    plot_effect_size(gene_data, res_entry, effect_plot_path, ld_r_vector=ld_vec, snp_list=snp_list_ld)
+                    plot_effect_size(gene_data, res_entry, effect_plot_path, ld_r_vector=ld_vec, snp_list=snp_list_ld, mapping=gene_mapping)
                 except Exception:
-                    plot_effect_size(gene_data, res_entry, effect_plot_path)
+                    plot_effect_size(gene_data, res_entry, effect_plot_path, mapping=gene_mapping)
 
         # Cleanup
         clear_snp_cache()
@@ -371,6 +483,18 @@ def main():
         out_df.to_csv(output_path, sep='\t', index=False)
         print(f"\nAnalysis complete. Results saved to {output_path}")
         if args.plot:
+            # Generate Manhattan Plot
+            print("Generating Manhattan Plot...")
+            manhattan_path = os.path.join(plot_dir, f"{os.path.basename(args.out)}_manhattan.{plot_ext}")
+            plot_manhattan(out_df, manhattan_path, p_thresh=args.plot_threshold, mapping=gene_mapping)
+            
+            # Additional Plots
+            print("Generating additional diagnostic plots...")
+            plot_qq(out_df, os.path.join(plot_dir, f"{os.path.basename(args.out)}_qq.{plot_ext}"))
+            plot_volcano(out_df, os.path.join(plot_dir, f"{os.path.basename(args.out)}_volcano.{plot_ext}"), p_thresh=args.plot_threshold, mapping=gene_mapping)
+            plot_smr_vs_heidi(out_df, os.path.join(plot_dir, f"{os.path.basename(args.out)}_smr_vs_heidi.{plot_ext}"), smr_thresh=args.plot_threshold)
+            plot_single_vs_multi(out_df, os.path.join(plot_dir, f"{os.path.basename(args.out)}_single_vs_multi.{plot_ext}"))
+            
             print(f"Plots saved to {plot_dir}/")
     else:
         print("\nNo significant results to save.")
